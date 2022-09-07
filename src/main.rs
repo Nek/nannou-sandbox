@@ -24,16 +24,16 @@ fn start_audio() -> Sender<f32> {
 }
 
 fn sample_next(o: &mut SampleRequestOptions) -> f32 {
-    let mut res = o.freq;
+    let mut res = o.processor.freq;
     loop {
         match o.rx.try_recv() {
             Ok(v) => res = v,
             Err(_) => break,
         };
     }
-    o.freq = res;
+    o.processor.freq = res;
 
-    o.tick()
+    o.processor.tick(o.sample_rate)
 }
 
 pub struct SampleRequestOptions {
@@ -41,13 +41,31 @@ pub struct SampleRequestOptions {
     pub sample_clock: f32,
     pub nchannels: usize,
     pub rx: Receiver<f32>,
+    pub processor: SinOsc,
+}
+
+trait AudioProcessor {
+    fn tick(&mut self, sample_rate: f32) -> f32;
+}
+
+trait Oscillator {
+    fn set_freq(&mut self, last_freq: f32);
+
+    fn freq(&self) -> f32;
+
+    fn phase(&self) -> f32;
+
+    fn set_phase(&mut self, phase: f32);
+}
+
+pub struct SinOsc {
     pub freq: f32,
     pub phase: f32,
 }
 
-impl SampleRequestOptions {
-    fn tick(&mut self) -> f32 {
-        self.phase += self.freq * 1. / self.sample_rate;
+impl AudioProcessor for SinOsc {
+    fn tick(&mut self, sample_rate: f32) -> f32 {
+        self.phase += self.freq * 1. / sample_rate;
 
         if self.phase >= 0.5 {
             self.phase -= 1.
@@ -55,20 +73,22 @@ impl SampleRequestOptions {
 
         (self.phase * 2.0 * std::f32::consts::PI).sin() * 0.1
     }
+}
 
-    pub fn set_freq(&mut self, last_freq: f32) {
+impl Oscillator for SinOsc {
+    fn set_freq(&mut self, last_freq: f32) {
         self.freq = last_freq;
     }
 
-    pub fn freq(&self) -> f32 {
+    fn freq(&self) -> f32 {
         self.freq
     }
 
-    pub fn phase(&self) -> f32 {
+    fn phase(&self) -> f32 {
         self.phase
     }
 
-    pub fn set_phase(&mut self, phase: f32) {
+    fn set_phase(&mut self, phase: f32) {
         self.phase = phase;
     }
 }
@@ -87,8 +107,10 @@ where
         sample_rate,
         sample_clock,
         nchannels,
-        freq: 440.,
-        phase: 0.,
+        processor: SinOsc {
+            freq: 440.,
+            phase: 0.,
+        },
     };
 
     match config.sample_format() {
