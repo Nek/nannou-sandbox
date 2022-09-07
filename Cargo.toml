@@ -14,6 +14,10 @@ nannou = "0.18.1"
 libm = "0.2.5"
 pad = "0.1.6"
 
+[profile.dev]
+debug = 2
+opt-level = 1
+
 [profile.release]
 strip = true
 opt-level = "z" # makes everything slower though
