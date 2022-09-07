@@ -13,6 +13,7 @@ identifier = "io.github.nek.pictograms"
 nannou = "0.18.1"
 libm = "0.2.5"
 pad = "0.1.6"
+coreaudio-rs = "0.11.1"
 
 [profile.dev]
 debug = 2
