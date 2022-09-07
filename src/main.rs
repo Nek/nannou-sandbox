@@ -24,31 +24,16 @@ fn start_audio() -> Sender<f32> {
 }
 
 fn sample_next(o: &mut SampleRequestOptions) -> f32 {
-    
-    let mut res = o.last_freq;
+    let mut res = o.freq;
     loop {
         match o.rx.try_recv() {
             Ok(v) => res = v,
             Err(_) => break,
         };
     }
-    o.last_freq = res;
+    o.freq = res;
 
-    let sample_time = 1. / o.sample_rate;
-
-        println!("{}", sample_time);
-
-
-    o.phase += res * sample_time;
-
-    if o.phase >= 0.5 {
-        o.phase -= 1.
-    }
-    
-    o.tick();
-    (o.phase * 2.0 * std::f32::consts::PI).sin() * 0.1
-    // o.tone(res) * 0.1// + o.tone(880.) * 0.1
-    // combination of several tones
+    o.tick()
 }
 
 pub struct SampleRequestOptions {
@@ -56,24 +41,27 @@ pub struct SampleRequestOptions {
     pub sample_clock: f32,
     pub nchannels: usize,
     pub rx: Receiver<f32>,
-    pub last_freq: f32,
+    pub freq: f32,
     pub phase: f32,
 }
 
 impl SampleRequestOptions {
-    fn tone(&self, freq: f32) -> f32 {
-        (self.sample_clock * freq * 2.0 * std::f32::consts::PI / self.sample_rate).sin()
-    }
-    fn tick(&mut self) {
-        self.sample_clock = (self.sample_clock + 1.0); //% self.sample_rate;
+    fn tick(&mut self) -> f32 {
+        self.phase += self.freq * 1. / self.sample_rate;
+
+        if self.phase >= 0.5 {
+            self.phase -= 1.
+        }
+
+        (self.phase * 2.0 * std::f32::consts::PI).sin() * 0.1
     }
 
-    pub fn set_last_freq(&mut self, last_freq: f32) {
-        self.last_freq = last_freq;
+    pub fn set_freq(&mut self, last_freq: f32) {
+        self.freq = last_freq;
     }
 
-    pub fn last_freq(&self) -> f32 {
-        self.last_freq
+    pub fn freq(&self) -> f32 {
+        self.freq
     }
 
     pub fn phase(&self) -> f32 {
@@ -99,7 +87,7 @@ where
         sample_rate,
         sample_clock,
         nchannels,
-        last_freq: 440.,
+        freq: 440.,
         phase: 0.,
     };
 
