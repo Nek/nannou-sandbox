@@ -24,17 +24,30 @@ fn start_audio() -> Sender<f32> {
 }
 
 fn sample_next(o: &mut SampleRequestOptions) -> f32 {
-    o.tick();
-    let mut res = o.last_freq();
+    
+    let mut res = o.last_freq;
     loop {
         match o.rx.try_recv() {
             Ok(v) => res = v,
             Err(_) => break,
         };
     }
-    println!("{}", res);
-    o.set_last_freq(res);
-    o.tone(res) * 0.1 + o.tone(880.) * 0.1
+    o.last_freq = res;
+
+    let sample_time = 1. / o.sample_rate;
+
+        println!("{}", sample_time);
+
+
+    o.phase += res * sample_time;
+
+    if o.phase >= 0.5 {
+        o.phase -= 1.
+    }
+    
+    o.tick();
+    (o.phase * 2.0 * std::f32::consts::PI).sin() * 0.1
+    // o.tone(res) * 0.1// + o.tone(880.) * 0.1
     // combination of several tones
 }
 
@@ -44,6 +57,7 @@ pub struct SampleRequestOptions {
     pub nchannels: usize,
     pub rx: Receiver<f32>,
     pub last_freq: f32,
+    pub phase: f32,
 }
 
 impl SampleRequestOptions {
@@ -51,7 +65,7 @@ impl SampleRequestOptions {
         (self.sample_clock * freq * 2.0 * std::f32::consts::PI / self.sample_rate).sin()
     }
     fn tick(&mut self) {
-        self.sample_clock = (self.sample_clock + 1.0) % self.sample_rate;
+        self.sample_clock = (self.sample_clock + 1.0); //% self.sample_rate;
     }
 
     pub fn set_last_freq(&mut self, last_freq: f32) {
@@ -60,6 +74,14 @@ impl SampleRequestOptions {
 
     pub fn last_freq(&self) -> f32 {
         self.last_freq
+    }
+
+    pub fn phase(&self) -> f32 {
+        self.phase
+    }
+
+    pub fn set_phase(&mut self, phase: f32) {
+        self.phase = phase;
     }
 }
 
@@ -78,6 +100,7 @@ where
         sample_clock,
         nchannels,
         last_freq: 440.,
+        phase: 0.,
     };
 
     match config.sample_format() {
@@ -209,7 +232,10 @@ fn event(app: &App, model: &mut Model, event: Event) {
                 }
             }
             nannou::winit::event::DeviceEvent::MouseMotion { delta: _ } => {
-                model.tx.send((app.mouse.y + 300.) / 600. * 1000. + 1000.).unwrap();
+                model
+                    .tx
+                    .send((app.mouse.y + 300.) / 600. * 1000. + 1000.)
+                    .unwrap();
                 ()
             }
             _ => (),
