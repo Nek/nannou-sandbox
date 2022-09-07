@@ -1,5 +1,6 @@
 use libm::floorf;
-use nannou::{event::ElementState, prelude::*};
+use nannou::{prelude::*};
+use nannou::event::ElementState;
 use pad::PadStr;
 
 fn main() {
