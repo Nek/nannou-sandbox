@@ -1,0 +1,2 @@
+dist:
+	cargo bundle --release
