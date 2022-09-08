@@ -1,3 +1,4 @@
+use dsp::Walker;
 use dsp::{FromSample, Graph, Node, Sample};
 
 /// Our type for which we will implement the `Dsp` trait.
@@ -65,38 +66,35 @@ use pad::PadStr;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 fn start_audio() -> Sender<f32> {
-
     let mut graph = Graph::new();
 
     // Construct our fancy Synth and add it to the graph!
-    let _synth = graph.add_node(DspNode::Synth);
+    let synth = graph.add_node(DspNode::Synth);
 
     let mut osc1 = DspNode::Oscillator(0.0, A5_HZ, 0.2);
     let _osc2 = DspNode::Oscillator(0.0, D5_HZ, 0.1);
     let _osc3 = DspNode::Oscillator(0.0, F5_HZ, 0.15);
 
-    match osc1 {
-        DspNode::Synth => (),
-        DspNode::Oscillator(_, ref mut pitch, _) => *pitch += 2.,
-    }
-
-
     // Connect a few oscillators to the synth.
-    let (_, oscillator_a) = graph.add_input(osc1, _synth);
-    graph.add_input(_osc2, _synth);
-    graph.add_input(_osc3, _synth);
-
-    // If adding a connection between two nodes would create a cycle, Graph will return an Err.
-    if let Err(err) = graph.add_connection(_synth, oscillator_a) {
-        println!("Testing for cycle error: {}", &err);
-    }
+    graph.add_input(osc1, synth);
+    graph.add_input(_osc2, synth);
+    graph.add_input(_osc3, synth);
 
     // Set the synth as the master node for the graph.
-    graph.set_master(Some(_synth));
+    graph.set_master(Some(synth));
 
     let (tx, rx): (Sender<f32>, Receiver<f32>) = channel();
+
+    let mut request = SampleRequestOptions {
+        sample_rate: 0.,
+        nchannels: 0,
+        rx,
+        graph,
+        synth,
+    };
+
     thread::spawn(|| -> anyhow::Result<()> {
-        let stream = stream_setup_for(rx, graph)?;
+        let stream = stream_setup_for(request)?;
         stream.play()?;
         thread::sleep(Duration::MAX);
         Ok(())
@@ -109,23 +107,17 @@ pub struct SampleRequestOptions {
     nchannels: usize,
     rx: Receiver<f32>,
     graph: Graph<[f32; 2], DspNode>,
+    synth: dsp::NodeIndex,
 }
 
-pub fn stream_setup_for(
-    rx: Receiver<f32>,
-    graph: Graph<[f32; 2], DspNode>,
-) -> Result<cpal::Stream, anyhow::Error> {
+pub fn stream_setup_for(mut request: SampleRequestOptions) -> Result<cpal::Stream, anyhow::Error> {
     let (_host, device, config) = host_device_setup()?;
 
     let sample_rate = config.sample_rate().0 as f32;
     let nchannels = config.channels() as usize;
 
-    let request = SampleRequestOptions {
-        rx,
-        sample_rate,
-        nchannels,
-        graph,
-    };
+    request.sample_rate = sample_rate;
+    request.nchannels = nchannels;
 
     match config.sample_format() {
         cpal::SampleFormat::F32 => stream_make::<f32>(&device, &config.into(), request),
@@ -163,6 +155,19 @@ where
         config,
         move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
             let buffer = &mut [[0.0_f32, 0.0_f32]; 512];
+
+            loop {
+                if let Ok(v) = request.rx.try_recv() {
+                    let mut inputs = request.graph.inputs(request.synth);
+                    while let Some(input_idx) = inputs.next_node(&request.graph) {
+                        if let DspNode::Oscillator(_, ref mut pitch, _) = request.graph[input_idx] {
+                            *pitch = v as f64;
+                        }
+                    }
+                } else {
+                    break;
+                };
+            }
 
             request.graph.audio_requested(buffer, SAMPLE_HZ);
             let mut index = 0;
