@@ -19,7 +19,7 @@
     }
 
     impl SignalProcessor for SinOsc {
-        fn tick(&mut self, sample_rate: f32) {
+        fn process(&mut self, sample_rate: f32) {
             let freq = if let Some(freq) = self.parameters.get(&SinOscParameters::Pitch) {
                 *freq
             } else {

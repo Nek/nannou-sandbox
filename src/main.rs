@@ -41,7 +41,7 @@ fn sample_next(o: &mut SampleRequestOptions) -> f32 {
         };
     }
 
-    o.processor.tick(o.sample_rate);
+    o.processor.process(o.sample_rate);
     o.processor.output()
 }
 

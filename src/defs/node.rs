@@ -1,5 +1,5 @@
 pub trait SignalProcessor {
-    fn tick(&mut self, sample_rate: f32);
+    fn process(&mut self, sample_rate: f32);
 }
 
 pub trait Parametric<T> {
