@@ -1,2 +1,2 @@
 pub mod defs;
-pub mod osc;
+pub mod gen;

@@ -1,8 +1,8 @@
-use pictograms::defs::node::Parametric;
-use pictograms::defs::node::SignalProcessor;
-use pictograms::defs::node::SignalGenerator;
+use pictograms::gen::SinOsc;
 
-use pictograms::osc::sin::SinOsc;
+use pictograms::defs::Parametric;
+use pictograms::defs::{SignalProcessor, SignalGenerator};
+
 
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
@@ -13,7 +13,8 @@ use std::{
 use libm::floorf;
 use nannou::event::ElementState;
 use nannou::prelude::*;
-use pictograms::osc::sin::SinOscParameters;
+use pictograms::gen::SinOscParameters;
+
 use std::collections::HashMap;
 
 use pad::PadStr;
