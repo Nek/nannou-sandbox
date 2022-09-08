@@ -7,10 +7,13 @@ use std::{
 use libm::floorf;
 use nannou::event::ElementState;
 use nannou::prelude::*;
+use std::collections::HashMap;
 
 use pad::PadStr;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use pictograms::defs::node::{Parametric, SignalGenerator, SignalProcessor};
+use pictograms::osc::sin::{SinOsc, SinOscParameters};
 
 fn start_audio() -> Sender<f32> {
     let (tx, rx): (Sender<f32>, Receiver<f32>) = channel();
@@ -24,14 +27,13 @@ fn start_audio() -> Sender<f32> {
 }
 
 fn sample_next(o: &mut SampleRequestOptions) -> f32 {
-    let mut res = o.processor.parameter;
     loop {
-        match o.rx.try_recv() {
-            Ok(v) => res = v,
-            Err(_) => break,
+        if let Ok(v) = o.rx.try_recv() {
+            o.processor.set_parameter(SinOscParameters::Pitch, v)
+        } else {
+            break;
         };
     }
-    o.processor.parameter = res;
 
     o.processor.tick(o.sample_rate);
     o.processor.output()
@@ -44,64 +46,6 @@ pub struct SampleRequestOptions {
     processor: SinOsc,
 }
 
-trait SignalProcessor {
-    fn tick(&mut self, sample_rate: f32);
-}
-
-trait Parametric {
-    fn set_parameter(&mut self, value: f32);
-    fn parameter(&mut self) -> f32;
-}
-
-trait SignalReceiver {
-    fn set_input(&mut self, value: f32);
-}
-
-trait SignalGenerator {
-    fn output(&mut self) -> f32;
-}
-
-struct SinOsc {
-    phase: f32,
-    output: f32,
-    input: f32,
-    parameter: f32,
-}
-
-impl SignalProcessor for SinOsc {
-    fn tick(&mut self, sample_rate: f32) {
-        self.phase += self.parameter * 1. / sample_rate;
-
-        if self.phase >= 0.5 {
-            self.phase -= 1.
-        }
-
-        self.output = (self.phase * 2.0 * std::f32::consts::PI).sin() * 0.1;
-    }
-}
-
-impl Parametric for SinOsc {    
-    fn set_parameter(&mut self, value: f32) {
-        self.parameter = value;
-    }
-
-    fn parameter(&mut self) -> f32 {
-        self.parameter
-    }
-}
-
-impl SignalGenerator for SinOsc {
-    fn output(&mut self) -> f32 {
-        self.output
-    }
-}
-
-impl SignalReceiver for SinOsc {
-    fn set_input(&mut self, value: f32) {
-        self.input = value;
-    }
-}
-
 pub fn stream_setup_for<F>(on_sample: F, rx: Receiver<f32>) -> Result<cpal::Stream, anyhow::Error>
 where
     F: FnMut(&mut SampleRequestOptions) -> f32 + std::marker::Send + 'static + Copy,
@@ -109,18 +53,21 @@ where
     let (_host, device, config) = host_device_setup()?;
 
     let sample_rate = config.sample_rate().0 as f32;
-    let sample_clock = 0f32;
     let nchannels = config.channels() as usize;
+
+    let mut sin_osc = SinOsc {
+        phase: 0.,
+        output: 0.,
+        input: 0.,
+        parameters: HashMap::new(),
+    };
+    sin_osc.set_parameter(SinOscParameters::Pitch, 0.);
+
     let request = SampleRequestOptions {
         rx,
         sample_rate,
         nchannels,
-        processor: SinOsc {
-            parameter: 440.,
-            phase: 0.,
-            output: 0.,
-            input: 0.,
-        },
+        processor: sin_osc,
     };
 
     match config.sample_format() {
