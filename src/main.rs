@@ -8,20 +8,23 @@ pub enum DspNode {
     Synth,
     /// Oscillator will be our generator type of node, meaning that we will override
     /// the way it provides audio via its `audio_requested` method.
-    Oscillator(Phase, Frequency, Volume),
+    SinOscillator(Phase, Frequency, Volume),
+    Tester,
 }
 
 impl Node<[Output; CHANNELS]> for DspNode {
-    /// Here we'll override the audio_requested method and generate a sine wave.
     fn audio_requested(&mut self, buffer: &mut [[Output; CHANNELS]], sample_hz: f64) {
         match *self {
             DspNode::Synth => (),
-            DspNode::Oscillator(ref mut phase, frequency, volume) => {
+            DspNode::SinOscillator(ref mut phase, frequency, volume) => {
                 dsp::slice::map_in_place(buffer, |_| {
                     let val = sine_wave(*phase, volume);
                     *phase += frequency / sample_hz;
                     dsp::Frame::from_fn(|_| val)
                 });
+            }
+            DspNode::Tester => {
+                println!("length: {}", buffer.len());
             }
         }
     }
@@ -44,7 +47,6 @@ type Frequency = f64;
 type Volume = f32;
 
 const CHANNELS: usize = 2;
-const FRAMES: u32 = 64;
 const SAMPLE_HZ: f64 = 44_100.0;
 
 const A5_HZ: Frequency = 440.0;
@@ -71,21 +73,31 @@ fn start_audio() -> Sender<f32> {
     // Construct our fancy Synth and add it to the graph!
     let synth = graph.add_node(DspNode::Synth);
 
-    let mut osc1 = DspNode::Oscillator(0.0, A5_HZ, 0.2);
-    let _osc2 = DspNode::Oscillator(0.0, D5_HZ, 0.1);
-    let _osc3 = DspNode::Oscillator(0.0, F5_HZ, 0.15);
+    let osc1 = DspNode::SinOscillator(0.0, A5_HZ, 0.2);
+    let osc2 = DspNode::SinOscillator(0.0, D5_HZ, 0.1);
+    let osc3 = DspNode::SinOscillator(0.0, F5_HZ, 0.15);
+
+    let osc4 = DspNode::SinOscillator(0.0, A5_HZ, 0.2);
+    let osc5 = DspNode::SinOscillator(0.0, D5_HZ, 0.1);
+    let osc6 = DspNode::SinOscillator(0.0, F5_HZ, 0.15);
+
+    let tester = graph.add_node(DspNode::Tester);
 
     // Connect a few oscillators to the synth.
     graph.add_input(osc1, synth);
-    graph.add_input(_osc2, synth);
-    graph.add_input(_osc3, synth);
+    graph.add_input(osc2, synth);
+    graph.add_input(osc3, synth);
+
+    graph.add_input(osc4, tester);
+    graph.add_input(osc5, tester);
+    graph.add_input(osc6, tester);
 
     // Set the synth as the master node for the graph.
     graph.set_master(Some(synth));
 
     let (tx, rx): (Sender<f32>, Receiver<f32>) = channel();
 
-    let mut request = SampleRequestOptions {
+    let request = SampleRequestOptions {
         sample_rate: 0.,
         nchannels: 0,
         rx,
@@ -160,7 +172,9 @@ where
                 if let Ok(v) = request.rx.try_recv() {
                     let mut inputs = request.graph.inputs(request.synth);
                     while let Some(input_idx) = inputs.next_node(&request.graph) {
-                        if let DspNode::Oscillator(_, ref mut pitch, _) = request.graph[input_idx] {
+                        if let DspNode::SinOscillator(_, ref mut pitch, _) =
+                            request.graph[input_idx]
+                        {
                             *pitch = v as f64;
                         }
                     }
