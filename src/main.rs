@@ -1,8 +1,54 @@
-use pictograms::gen::SinOsc;
+use dsp::{FromSample, Graph, Node, Sample};
 
-use pictograms::defs::Parametric;
-use pictograms::defs::{SignalProcessor, SignalGenerator};
+/// Our type for which we will implement the `Dsp` trait.
+#[derive(Debug)]
+pub enum DspNode {
+    /// Synth will be our demonstration of a master GraphNode.
+    Synth,
+    /// Oscillator will be our generator type of node, meaning that we will override
+    /// the way it provides audio via its `audio_requested` method.
+    Oscillator(Phase, Frequency, Volume),
+}
 
+impl Node<[Output; CHANNELS]> for DspNode {
+    /// Here we'll override the audio_requested method and generate a sine wave.
+    fn audio_requested(&mut self, buffer: &mut [[Output; CHANNELS]], sample_hz: f64) {
+        match *self {
+            DspNode::Synth => (),
+            DspNode::Oscillator(ref mut phase, frequency, volume) => {
+                dsp::slice::map_in_place(buffer, |_| {
+                    let val = sine_wave(*phase, volume);
+                    *phase += frequency / sample_hz;
+                    dsp::Frame::from_fn(|_| val)
+                });
+            }
+        }
+    }
+}
+
+/// Return a sine wave for the given phase.
+fn sine_wave<S: Sample>(phase: Phase, volume: Volume) -> S
+where
+    S: Sample + FromSample<f32>,
+{
+    use std::f64::consts::PI;
+    ((phase * PI * 2.0).sin() as f32 * volume).to_sample::<S>()
+}
+
+/// SoundStream is currently generic over i8, i32 and f32. Feel free to change it!
+type Output = f32;
+
+type Phase = f64;
+type Frequency = f64;
+type Volume = f32;
+
+const CHANNELS: usize = 2;
+const FRAMES: u32 = 64;
+const SAMPLE_HZ: f64 = 44_100.0;
+
+const A5_HZ: Frequency = 440.0;
+const D5_HZ: Frequency = 587.33;
+const F5_HZ: Frequency = 698.46;
 
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
@@ -13,18 +59,44 @@ use std::{
 use libm::floorf;
 use nannou::event::ElementState;
 use nannou::prelude::*;
-use pictograms::gen::SinOscParameters;
-
-use std::collections::HashMap;
 
 use pad::PadStr;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 fn start_audio() -> Sender<f32> {
+
+    let mut graph = Graph::new();
+
+    // Construct our fancy Synth and add it to the graph!
+    let _synth = graph.add_node(DspNode::Synth);
+
+    let mut osc1 = DspNode::Oscillator(0.0, A5_HZ, 0.2);
+    let _osc2 = DspNode::Oscillator(0.0, D5_HZ, 0.1);
+    let _osc3 = DspNode::Oscillator(0.0, F5_HZ, 0.15);
+
+    match osc1 {
+        DspNode::Synth => (),
+        DspNode::Oscillator(_, ref mut pitch, _) => *pitch += 2.,
+    }
+
+
+    // Connect a few oscillators to the synth.
+    let (_, oscillator_a) = graph.add_input(osc1, _synth);
+    graph.add_input(_osc2, _synth);
+    graph.add_input(_osc3, _synth);
+
+    // If adding a connection between two nodes would create a cycle, Graph will return an Err.
+    if let Err(err) = graph.add_connection(_synth, oscillator_a) {
+        println!("Testing for cycle error: {}", &err);
+    }
+
+    // Set the synth as the master node for the graph.
+    graph.set_master(Some(_synth));
+
     let (tx, rx): (Sender<f32>, Receiver<f32>) = channel();
     thread::spawn(|| -> anyhow::Result<()> {
-        let stream = stream_setup_for(sample_next, rx)?;
+        let stream = stream_setup_for(rx, graph)?;
         stream.play()?;
         thread::sleep(Duration::MAX);
         Ok(())
@@ -32,60 +104,33 @@ fn start_audio() -> Sender<f32> {
     tx
 }
 
-fn sample_next(o: &mut SampleRequestOptions) -> f32 {
-    loop {
-        if let Ok(v) = o.rx.try_recv() {
-            o.processor.set_parameter(SinOscParameters::Pitch, v)
-        } else {
-            break;
-        };
-    }
-
-    o.processor.process(o.sample_rate);
-    o.processor.output()
-}
-
 pub struct SampleRequestOptions {
     sample_rate: f32,
     nchannels: usize,
     rx: Receiver<f32>,
-    processor: SinOsc,
+    graph: Graph<[f32; 2], DspNode>,
 }
 
-pub fn stream_setup_for<F>(on_sample: F, rx: Receiver<f32>) -> Result<cpal::Stream, anyhow::Error>
-where
-    F: FnMut(&mut SampleRequestOptions) -> f32 + std::marker::Send + 'static + Copy,
-{
+pub fn stream_setup_for(
+    rx: Receiver<f32>,
+    graph: Graph<[f32; 2], DspNode>,
+) -> Result<cpal::Stream, anyhow::Error> {
     let (_host, device, config) = host_device_setup()?;
 
     let sample_rate = config.sample_rate().0 as f32;
     let nchannels = config.channels() as usize;
 
-    let mut sin_osc = SinOsc {
-        phase: 0.,
-        output: 0.,
-        input: 0.,
-        parameters: HashMap::new(),
-    };
-    sin_osc.set_parameter(SinOscParameters::Pitch, 0.);
-
     let request = SampleRequestOptions {
         rx,
         sample_rate,
         nchannels,
-        processor: sin_osc,
+        graph,
     };
 
     match config.sample_format() {
-        cpal::SampleFormat::F32 => {
-            stream_make::<f32, _>(&device, &config.into(), on_sample, request)
-        }
-        cpal::SampleFormat::I16 => {
-            stream_make::<i16, _>(&device, &config.into(), on_sample, request)
-        }
-        cpal::SampleFormat::U16 => {
-            stream_make::<u16, _>(&device, &config.into(), on_sample, request)
-        }
+        cpal::SampleFormat::F32 => stream_make::<f32>(&device, &config.into(), request),
+        cpal::SampleFormat::I16 => stream_make::<i16>(&device, &config.into(), request),
+        cpal::SampleFormat::U16 => stream_make::<u16>(&device, &config.into(), request),
     }
 }
 
@@ -104,40 +149,39 @@ pub fn host_device_setup(
     Ok((host, device, config))
 }
 
-pub fn stream_make<T, F>(
+pub fn stream_make<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    on_sample: F,
     mut request: SampleRequestOptions,
 ) -> Result<cpal::Stream, anyhow::Error>
 where
     T: cpal::Sample,
-    F: FnMut(&mut SampleRequestOptions) -> f32 + std::marker::Send + 'static + Copy,
 {
     let err_fn = |err| eprintln!("Error building output sound stream: {}", err);
 
     let stream = device.build_output_stream(
         config,
         move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
-            on_window(output, &mut request, on_sample)
+            let buffer = &mut [[0.0_f32, 0.0_f32]; 512];
+
+            request.graph.audio_requested(buffer, SAMPLE_HZ);
+            let mut index = 0;
+            for frame in output.chunks_mut(request.nchannels) {
+                let channels = match buffer.get(index) {
+                    Some(v) => v,
+                    None => &[0.0_f32, 0.0_f32],
+                };
+                let l: T = cpal::Sample::from::<f32>(&channels[0]);
+                let r: T = cpal::Sample::from::<f32>(&channels[1]);
+                frame[0] = l;
+                frame[1] = r;
+                index += 1;
+            }
         },
         err_fn,
     )?;
 
     Ok(stream)
-}
-
-fn on_window<T, F>(output: &mut [T], request: &mut SampleRequestOptions, mut on_sample: F)
-where
-    T: cpal::Sample,
-    F: FnMut(&mut SampleRequestOptions) -> f32 + std::marker::Send + 'static,
-{
-    for frame in output.chunks_mut(request.nchannels) {
-        let value: T = cpal::Sample::from::<f32>(&on_sample(request));
-        for sample in frame.iter_mut() {
-            *sample = value;
-        }
-    }
 }
 
 fn main() {

@@ -18,6 +18,8 @@ anyhow = "1.0.12"
 clap = { version = "3.1", default-features = false, features = ["std"] }
 enum-map = "2.4.1"
 derivative = "2.2.0"
+dsp-chain = { git = "https://github.com/RustAudio/dsp-chain.git" }
+dasp = { version = "0.11.0", features = ["slice", "interpolate", "signal"] }
 
 [profile.dev]
 debug = 2
