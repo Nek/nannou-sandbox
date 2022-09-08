@@ -1,3 +1,9 @@
+use pictograms::defs::node::Parametric;
+use pictograms::defs::node::SignalProcessor;
+use pictograms::defs::node::SignalGenerator;
+
+use pictograms::osc::sin::SinOsc;
+
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
     thread,
@@ -7,13 +13,12 @@ use std::{
 use libm::floorf;
 use nannou::event::ElementState;
 use nannou::prelude::*;
+use pictograms::osc::sin::SinOscParameters;
 use std::collections::HashMap;
 
 use pad::PadStr;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use pictograms::defs::node::{Parametric, SignalGenerator, SignalProcessor};
-use pictograms::osc::sin::{SinOsc, SinOscParameters};
 
 fn start_audio() -> Sender<f32> {
     let (tx, rx): (Sender<f32>, Receiver<f32>) = channel();
